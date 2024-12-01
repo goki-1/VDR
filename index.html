@@ -20,6 +20,9 @@
       height: 100vh;
       overflow: hidden;
     }
+    .cm-highlight-line {
+      background-color: rgba(255, 255, 0, 0.3); /* Light yellow highlight */
+    }
     .container {
       display: flex;
       width: 100%;
@@ -112,7 +115,7 @@
       padding: 10px;
       margin: 10px;
       background-color: #444;
-      color: #f1f1f1;
+      color: #f1f1f1; 
       border: none;
       cursor: pointer;
       transition: background-color 0.3s;
@@ -134,6 +137,32 @@
       width: 5px;
       background-color: #444;
       cursor: col-resize;
+    }
+    /* Spinner Styles */
+    #loadingIcon {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999; /* Ensure it overlays everything else */
+    }
+    .spinner {
+      border: 16px solid #f3f3f3; /* Light grey */
+      border-top: 16px solid #444; /* Dark grey */
+      border-radius: 50%;
+      width: 120px;
+      height: 120px;
+      animation: spin 2s linear infinite;
+    }
+    /* Animation */
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -168,6 +197,8 @@
         </div>
       </div>
       <button class="run-button" onclick="runCode()">Run Code</button>
+      <!-- <button id="highlightButton">Highlight Line 1</button>
+<button id="removeHighlightButton">Remove Highlight from Line 1</button> -->
     </div>
 
     <div class="resizer" id="dragMe"></div>
@@ -189,11 +220,22 @@
     </div>
   </div>
 
+  <!-- Loading Icon -->
+  <div id="loadingIcon" style="display: none;">
+    <div class="spinner"></div>
+  </div>
+
   <!-- Include CodeMirror JS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+  <!-- Include Esprima and Escodegen for JavaScript code parsing -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/esprima@4.0.1/dist/esprima.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/escodegen/1.11.1/escodegen.browser.min.js"></script> -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+
   <!-- Main Script -->
   <script>
     let htmlEditor, cssEditor, jsEditor;
@@ -237,56 +279,319 @@
       }
     }
 
-    async function runCode() {
+    function highlightLine(editor, lineNumber) {
+      editor.addLineClass(lineNumber, "background", "cm-highlight-line");
+    }
 
-      const htmlContent = htmlEditor.getValue();
-      const cssContent = cssEditor.getValue();
-      const jsContent = jsEditor.getValue();
-    
-      const output1 = `
+    function removeHighlight(editor, lineNumber) {
+      editor.removeLineClass(lineNumber, "background", "cm-highlight-line");
+    }
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (data && data.language && data.lines) {
+        const editor = getEditorByLanguage(data.language);
+        if (editor) {
+          highlightLines(editor, data.lines);
+        }
+      }
+    });
+
+    function getEditorByLanguage(language) {
+      switch (language.toLowerCase()) {
+        case 'html':
+          return htmlEditor;
+        case 'css':
+          return cssEditor;
+        case 'javascript':
+        case 'js':
+          return jsEditor;
+        default:
+          return null;
+      }
+    }
+
+    function highlightLines(editor, lineNumbers) {
+      // Clear previous highlights
+      clearAllHighlights(editor);
+      lineNumbers.forEach((lineNumber) => {
+        editor.addLineClass(lineNumber - 1, 'background', 'cm-highlight-line');
+      });
+    }
+
+    function clearAllHighlights(editor) {
+      editor.doc.eachLine((lineHandle) => {
+        editor.removeLineClass(lineHandle, 'background', 'cm-highlight-line');
+      });
+    }
+
+    async function runCode() {
+      // Show loading icon
+      document.getElementById('loadingIcon').style.display = 'flex';
+
+      let htmlContent = htmlEditor.getValue();
+      let cssContent = cssEditor.getValue();
+      let jsContent = jsEditor.getValue();
+      const outputPre1 = `
         <html>
           <head><style>${cssContent}</style></head>
           <body>${htmlContent}<script>${jsContent}<\/script></body>
         </html>
       `;
 
-      async function getEnhancedWebsiteCode() {
+      async function getEnhancedWebsiteCode(htmlContent, cssContent, jsContent) {
+        // Process HTML content to add data-line-number attributes
+        function addLineNumbersToHTML(htmlCode) {
+          const lines = htmlCode.split('\n');
+          let lineNumber = -1;
+          const processedLines = lines.map(line => {
+            lineNumber++;
+            // Match opening tags
+            return line.replace(/<([a-zA-Z][^>\s]*)/, `<$1 data-line-number="${lineNumber}"`);
+          });
+          let processedHTML = processedLines.join('\n');
+
+            // New HTML content to insert
+            const newContent = `
+                <div id="padder1234"></div>
+                <div id="explanationPanel123"><h3>Explanation</h3><p>Explanation here</p</div>
+            `;
+
+            // Insert new content before the closing </body> tag
+            processedHTML = processedHTML.replace(/<\/body>/, `${newContent}\n</body>`);
+
+            return processedHTML;
+        }
+
+        // Process JavaScript content to insert displayJsLineNumber calls
+        function addDisplayJsLineNumber(jsCode) {
+  const instrumentedCode = Babel.transform(jsCode, {
+    presets: [],
+    plugins: [function myCustomPlugin(babel) {
+      const { types: t } = babel;
+      return {
+        visitor: {
+          // Instrument function bodies
+          BlockStatement(path) {
+            // Skip if already instrumented
+            if (path.node.instrumented) return;
+            path.node.instrumented = true;
+
+            const newBody = [];
+            path.node.body.forEach(statement => {
+              if (
+                statement.type !== 'FunctionDeclaration' &&
+                statement.type !== 'ClassDeclaration'
+              ) {
+                const lineNumber = statement.loc.start.line;
+
+                // Create displayJsLineNumber(lineNumber); using babel.types
+                const displayLineNode = t.expressionStatement(
+                  t.callExpression(
+                    t.identifier('displayJsLineNumber'),
+                    [t.numericLiteral(lineNumber)]
+                  )
+                );
+
+                newBody.push(displayLineNode);
+              }
+              newBody.push(statement);
+            });
+            path.node.body = newBody;
+          },
+          // Instrument top-level statements
+          Program(path) {
+            const newBody = [];
+            path.node.body.forEach(statement => {
+              if (
+                statement.type !== 'FunctionDeclaration' &&
+                statement.type !== 'ClassDeclaration'
+              ) {
+                const lineNumber = statement.loc.start.line;
+
+                // Create displayJsLineNumber(lineNumber); using babel.types
+                const displayLineNode = t.expressionStatement(
+                  t.callExpression(
+                    t.identifier('displayJsLineNumber'),
+                    [t.numericLiteral(lineNumber)]
+                  )
+                );
+
+                newBody.push(displayLineNode);
+              }
+              newBody.push(statement);
+            });
+            path.node.body = newBody;
+          }
+        }
+      };
+    }]
+  }).code;
+
+  const functionDefinition = `
+  function displayJsLineNumber(lineNumber) {
+    window.parent.postMessage({ language: 'javascript', lines: [lineNumber] }, '*');
+  }
+  `;
+
+  return functionDefinition + '\n' + instrumentedCode;
+}
+async function getExplanations(htmlContent, cssContent, jsContent) {
         const apiKey = "";
-        
+        try {
+        // Prepare the payload for the API
+        const payload = {
+          model: "gpt-4o-mini",
+          //model:"gpt-4o-2024-08-06",
+          messages: [
+          {
+                role: 'system',
+                content: 'You are top professor that provides explanations for HTML, css and javascript code. Return the explanations as a JSON object, where each key is the line number of the html tag(same as data-line-number), and the value is the explanation about html, js code and css accosiated with that line, output like {line:5, explanation:"Explain here"}',
+              },
+              {
+                role: 'user',
+                content: `I am beginner to programming, provide a clear explanation based on this code
+                HTML: ${htmlContent}
+                CSS: ${cssContent}
+                JavaScript: ${jsContent}
+                `
+                ,
+              },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "html_analysis",
+              schema: {
+                type: "object",
+                properties: {
+                  lines: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        line_number: { type: "integer" },
+                        explanation: { type: "string", description:`for reference here is one explanation "This tag serves the purpose of [function] ` },
+                        AssociatedCSS:{type: "string", description:`styled using [specific CSS rules or classes, e.g., '.classname' applies {property: value}] this property does [this]`},
+                        AssociatedJSCode:{type: "string", description:`explain JavaScript [specific event or functionality]. The interaction triggers [this] JavaScript code, which lead to [this] which performs [specific behavior or outcome]`}
+                      },
+                      required: ["line_number", "explanation", "AssociatedCSS", "AssociatedJSCode"],
+                      additionalProperties: false
+                    }
+                  }
+                },
+                required: ["lines"],
+                additionalProperties: false
+              },
+              strict: true
+            }
+          }
+        };
+
+        // Make the API request
         const response = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
+            Authorization: `Bearer ${apiKey}`,
           },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            messages: [
-              {
-                role: "system",
-                content: "You are a helpful assistant that assists in generating enhanced website code."
-              },
-              {
-                role: "user",
-                content: "Here is the HTML, CSS, and JavaScript code for a website:"
-              },
-              {
-                role: "user",
-                content: output1
-              },
-              {
-                role: "user",
-                content: `Please return a new version of this website code(complete code so that it can run out of box)
-                with the following enhancements:
-                - Each interactive trigger (like click, hover, key press or any other) should visually highlight with red color.
-                - The affected DOM element should also get highlighted with yellow color.
-                - remember do not add or modify anything else in the original look of the website like explaination that this enhanced version or anything else
-                - do not put any comment in the code just pure html, css and javascript code
-                - Explanations should dynamically change in an explanation panel at the bottom of the screen when an event is triggered.
-            
-                The explanation panel should have the following CSS:
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+    if (data.choices && data.choices.length > 0) {
+      const explanations = data.choices[0].message;
+      const parsedExplanations = JSON.parse(explanations.content);
       
-                #explanationPanel {
+      var explanationObject =[]
+      // Ensure `lines` is accessed correctly
+      if (parsedExplanations.lines && Array.isArray(parsedExplanations.lines)) {
+        parsedExplanations.lines.forEach(line => {
+            let explanationText = line.explanation;
+
+            if (line.AssociatedCSS && line.AssociatedCSS.length >= 3) {
+            explanationText += `.. Associated CSS: ${line.AssociatedCSS}`;
+            }
+
+            if (line.AssociatedJSCode && line.AssociatedJSCode.length >= 3) {
+            explanationText += `.. Associated JSCode: ${line.AssociatedJSCode}`;
+            }
+
+            explanationObject[line.line_number] = explanationText;
+        });
+      } else {
+        console.error("Lines array is missing or not in the correct format.");
+        alert("An unexpected response format was received. Please check the console for details.");
+      }
+      
+      return explanationObject;
+    } else {
+      alert("No explanations found in the response.");
+    }
+    } catch (error) {
+      console.error("Error calling the OpenAI API:", error);
+      alert("An error occurred while fetching explanations. Check the console for details.");
+      }
+    
+    }
+
+
+        // Enhanced HTML content
+        const enhancedHTML = addLineNumbersToHTML(htmlContent);
+        
+        const explanationsObject = await getExplanations(enhancedHTML, cssContent, jsContent)
+        // Enhanced JS content
+        console.log("76767bb768b  ", explanationsObject)
+        const explanationsObjectScript = `
+            <script>
+            var explanationsObject = ${JSON.stringify(explanationsObject)};
+            <\/script>
+            `;
+        const enhancedJS = addDisplayJsLineNumber(jsContent);
+
+        // JavaScript code to attach event listeners to HTML elements
+        const htmlEventListenerScript = `
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+          function attachEventListeners() {
+            document.body.addEventListener('click', function(event) {
+              const target = event.target.closest('[data-line-number]');
+              if (target) {
+                const lineNumber = target.getAttribute('data-line-number');
+                highlightElement(target);
+                window.parent.postMessage({ language: 'html', lines: [parseInt(lineNumber) + 1] }, '*');
+                
+                // Access the explanation from explanationsObject
+                const explanation = explanationsObject[parseInt(lineNumber) ];
+                if (explanation) {
+                document.querySelector('#explanationPanel123 p').innerText = explanation;
+                } else {
+                document.querySelector('#explanationPanel123 p').innerText = 'No explanation available for this element.';
+                }
+                }
+            });
+          }
+
+          function highlightElement(element) {
+            element.classList.add('highlighted');
+            setTimeout(() => {
+              element.classList.remove('highlighted');
+            }, 1000);
+          }
+
+          attachEventListeners();
+        });
+        <\/script>
+        `;
+
+        // Build the enhanced code
+        const enhancedCode = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>${cssContent}
+            #explanationPanel123 {
                   position: fixed;
                   bottom: 0;
                   left: 0;
@@ -295,37 +600,47 @@
                   background-color: #333;
                   color: #f1f1f1;
                   overflow-y: auto;
-                  padding: 10px;
+                  padding: 5px;
                   box-sizing: border-box;
                   border-top: 1px solid #444;
                   font-family: Arial, sans-serif;
+                  text-align: center;
                 }
-                <div><h3>Explaination</h3> explaination here</div>
-                Add JavaScript functions that dynamically update explanations based on events triggered on the page.`
-              }
-            ]
-          })
-        });
+                #padder1234 {
+                    height: 150px;
+                }
+            .highlighted {
+            outline: 2px solid red;
+            transition: outline 0.3s ease-in-out;
+          }</style>
+        </head>
+        <body>
+        ${enhancedHTML}
+        ${explanationsObjectScript}
+        <script>
+        ${enhancedJS}
+        <\/script>
+        ${htmlEventListenerScript}
+        </body>
+        </html>
+        `;
 
-        if (!response.ok) {
-          throw new Error(`Error: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return data.choices[0].message.content;
+        return enhancedCode;
       }
 
-
-    try {
-        const enhancedCode = await getEnhancedWebsiteCode();
-        console.log("Enhanced Website Code:", enhancedCode);
-
-        renderOutput('outputFrame1', output1); // Render normal output
+      try {
+        const enhancedCode = await getEnhancedWebsiteCode(htmlContent, cssContent, jsContent);
+        
+        renderOutput('outputFrame1', outputPre1); // Render normal output
         renderOutput('outputFrame2', enhancedCode); // Render enhanced output
       } catch (error) {
         console.error("Error fetching enhanced website code:", error);
+      } finally {
+        // Hide loading icon
+        document.getElementById('loadingIcon').style.display = 'none';
       }
     }
+
 
     function renderOutput(iframeId, content) {
       const iframe = document.getElementById(iframeId);
